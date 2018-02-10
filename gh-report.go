@@ -12,10 +12,58 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// User is a structure with information about a user
+type User struct {
+	ID  string
+	URL string
+}
+
+// NewUser create a new User
+func NewUser(u *github.User) *User {
+	return &User{ID: *u.Login, URL: *u.HTMLURL}
+}
+
+func (u *User) String() string {
+	return "[@" + u.ID + "]"
+}
+
+// Link returns a markdown style link to the item
+func (u *User) Link() string {
+	return fmt.Sprintf("[@%s]: %s", u.ID, u.URL)
+}
+
+// Users is a structure to store information about users
+type Users map[string]*User
+
+// Add adds a GH user to a map of Users if the user does not exist
+func (users Users) Add(u *github.User) *User {
+	if user, ok := users[*u.Login]; ok {
+		return user
+	}
+	user := NewUser(u)
+	users[user.ID] = user
+	return user
+}
+
+// Links returns a string with markdown links to all users
+func (users Users) Links() string {
+	var ret string
+	var r string
+	for _, user := range users {
+		r += ret + user.Link()
+		if ret == "" {
+			ret = "\n"
+		}
+	}
+	return r
+}
+
 // Item has some fields extracted from GitHub issue (PRs are issues too)
 type Item struct {
 	issue     *github.Issue
 	ID        string
+	Repo      string
+	Number    int
 	PR        bool
 	State     string
 	Title     string
@@ -23,17 +71,20 @@ type Item struct {
 	CreatedBy *User
 }
 
-func newItem(issue *github.Issue, repo string) *Item {
+// NewItem creates an new Item and extracts some additional information
+func NewItem(issue *github.Issue, repo string, users *Users) *Item {
 	item := &Item{issue: issue,
-		ID:    fmt.Sprintf("%s#%d", repo, *issue.Number),
-		PR:    issue.IsPullRequest(),
-		State: *issue.State,
-		Title: *issue.Title,
-		URL:   *issue.HTMLURL,
+		ID:     fmt.Sprintf("%s#%d", repo, *issue.Number),
+		Repo:   repo,
+		Number: *issue.Number,
+		PR:     issue.IsPullRequest(),
+		State:  *issue.State,
+		Title:  *issue.Title,
+		URL:    *issue.HTMLURL,
 	}
 
 	if issue.User != nil {
-		item.CreatedBy = newUser(issue.User)
+		item.CreatedBy = users.Add(issue.User)
 	}
 	return item
 }
@@ -47,31 +98,40 @@ func (i *Item) Link() string {
 	return fmt.Sprintf("[%s]: %s", i.ID, i.URL)
 }
 
-// User is a structure with information about a user
-type User struct {
-	ID  string
-	URL string
-}
+// Items is a map of items
+type Items map[string]*Item
 
-var users map[string]*User
-
-// Create a new User if it is not in the map
-func newUser(u *github.User) *User {
-	if user, ok := users[*u.Login]; ok {
-		return user
+// String return a string of a sorted list of Items in markdown
+func (items Items) String() string {
+	// TODO(rn): Sort by repo name and then numerically
+	var keys []string
+	for k := range items {
+		keys = append(keys, k)
 	}
-	user := &User{ID: *u.Login, URL: *u.HTMLURL}
-	users[user.ID] = user
-	return user
+	sort.Strings(keys)
+
+	var ret string
+	var r string
+	for _, item := range keys {
+		r += ret + "- " + items[item].String()
+		if ret == "" {
+			ret = "\n"
+		}
+	}
+	return r
 }
 
-func (u *User) String() string {
-	return "[@" + u.ID + "]"
-}
-
-// Link returns a markdown style link to the item
-func (u *User) Link() string {
-	return fmt.Sprintf("[@%s]: %s", u.ID, u.URL)
+// Links returns a string with markdown links to all issues
+func (items Items) Links() string {
+	var ret string
+	var r string
+	for _, item := range items {
+		r += ret + item.Link()
+		if ret == "" {
+			ret = "\n"
+		}
+	}
+	return r
 }
 
 func main() {
@@ -92,9 +152,11 @@ func main() {
 
 	client := github.NewClient(tc)
 
-	users = make(map[string]*User)
-	prs := make(map[string]*Item)
-	issues := make(map[string]*Item)
+	// Phase 1: Gather information about PRs/Issues/Users
+
+	allUsers := make(Users)
+	allPRs := make(Items)
+	allIssues := make(Items)
 
 	for _, ownerAndRepo := range repos {
 		t := strings.SplitN(ownerAndRepo, "/", 2)
@@ -111,50 +173,25 @@ func main() {
 			continue
 		}
 		for _, issue := range ghissues {
-			i := newItem(issue, ownerAndRepo)
-			// Only report on closed issues/PRs
-			if i.State != "closed" {
-				continue
-			}
+			i := NewItem(issue, ownerAndRepo, &allUsers)
 			if i.PR {
-				prs[i.ID] = i
+				allPRs[i.ID] = i
 			} else {
-				issues[i.ID] = i
+				allIssues[i.ID] = i
 			}
 		}
 	}
 
-	// Print output in markdown fragments
-	fmt.Println()
-	fmt.Println("## PRs:")
-	var prkeys []string
-	for k := range prs {
-		prkeys = append(prkeys, k)
-	}
-	sort.Strings(prkeys)
-	for _, pr := range prkeys {
-		fmt.Printf("- %s\n", prs[pr])
-	}
+	// Phase 2: Filter (TODO)
 
+	// Phase 3: Print output in markdown fragments
+	fmt.Println("## PRs:")
+	fmt.Println(allPRs)
 	fmt.Println()
 	fmt.Println("## Issues:")
-	var issuekeys []string
-	for k := range issues {
-		issuekeys = append(issuekeys, k)
-	}
-	sort.Strings(issuekeys)
-	for _, issue := range issuekeys {
-		fmt.Printf("- %s\n", issues[issue])
-	}
-
+	fmt.Println(allIssues)
 	fmt.Println()
-	for _, pr := range prs {
-		fmt.Println(pr.Link())
-	}
-	for _, issue := range issues {
-		fmt.Println(issue.Link())
-	}
-	for _, user := range users {
-		fmt.Println(user.Link())
-	}
+	fmt.Println(allPRs.Links())
+	fmt.Println(allIssues.Links())
+	fmt.Println(allUsers.Links())
 }
