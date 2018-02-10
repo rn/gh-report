@@ -65,8 +65,8 @@ type Comment struct {
 	User      *User
 }
 
-// NewComment creates a Comment from a GH issue comment.
-func NewComment(c *github.IssueComment, users *Users) *Comment {
+// NewCommentFromIssue creates a Comment from a GH issue comment.
+func NewCommentFromIssue(c *github.IssueComment, users *Users) *Comment {
 	comment := &Comment{CreatedAt: *c.CreatedAt}
 	if c.User != nil {
 		comment.User = users.Add(c.User)
@@ -74,8 +74,9 @@ func NewComment(c *github.IssueComment, users *Users) *Comment {
 	return comment
 }
 
-// Issue has some fields extracted from GitHub issue
-type Issue struct {
+// Item is either a Issue or a PR
+type Item struct {
+	PR        bool
 	ID        string
 	Repo      string
 	Number    int
@@ -89,9 +90,10 @@ type Issue struct {
 	Comments  []*Comment
 }
 
-// NewIssue creates an new Issue and extracts some additional information
-func NewIssue(ctx context.Context, client *github.Client, issue *github.Issue, repo string, users *Users) *Issue {
-	i := &Issue{ID: fmt.Sprintf("%s#%d", repo, *issue.Number),
+// NewItemFromIssue creates an new Item and extracts some additional information
+func NewItemFromIssue(ctx context.Context, client *github.Client, issue *github.Issue, repo string, users *Users) *Item {
+	i := &Item{PR: false,
+		ID:        fmt.Sprintf("%s#%d", repo, *issue.Number),
 		Repo:      repo,
 		Number:    *issue.Number,
 		State:     *issue.State,
@@ -117,7 +119,7 @@ func NewIssue(ctx context.Context, client *github.Client, issue *github.Issue, r
 			fmt.Println("Error getting comments for %s", issue.ID)
 		} else {
 			for _, comment := range ghcomments {
-				c := NewComment(comment, users)
+				c := NewCommentFromIssue(comment, users)
 				i.Comments = append(i.Comments, c)
 			}
 		}
@@ -125,7 +127,7 @@ func NewIssue(ctx context.Context, client *github.Client, issue *github.Issue, r
 	return i
 }
 
-func (i *Issue) String() string {
+func (i *Item) String() string {
 	ret := fmt.Sprintf("%s ([%s] %s", i.Title, i.ID, i.CreatedBy)
 
 	// Make the list of contributors unique
@@ -142,26 +144,26 @@ func (i *Issue) String() string {
 }
 
 // Link returns a markdown style link to the issue
-func (i *Issue) Link() string {
+func (i *Item) Link() string {
 	return fmt.Sprintf("[%s]: %s", i.ID, i.URL)
 }
 
-// Issues is a map of issues
-type Issues []*Issue
+// Items is list of items (Issues & PRs)
+type Items []*Item
 
-// String return a string of a sorted list of Issues in markdown
-func (issues Issues) String() string {
-	// Sort slice: If the issues are from the same repo, use the number otherwise use the repo name.
-	sort.Slice(issues, func(i, j int) bool {
-		if issues[i].Repo != issues[j].Repo {
-			return issues[i].Repo < issues[j].Repo
+// String return a string of a sorted list of Items in markdown
+func (items Items) String() string {
+	// Sort slice: If the items are from the same repo, use the number otherwise use the repo name.
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Repo != items[j].Repo {
+			return items[i].Repo < items[j].Repo
 		}
-		return issues[i].Number < issues[j].Number
+		return items[i].Number < items[j].Number
 	})
 	var ret string
 	var r string
-	for _, issue := range issues {
-		r += ret + "- " + issue.String()
+	for _, item := range items {
+		r += ret + "- " + item.String()
 		if ret == "" {
 			ret = "\n"
 		}
@@ -169,12 +171,12 @@ func (issues Issues) String() string {
 	return r
 }
 
-// Links returns a string with markdown links to all issues
-func (issues Issues) Links() string {
+// Links returns a string with markdown links to all items
+func (items Items) Links() string {
 	var ret string
 	var r string
-	for _, issue := range issues {
-		r += ret + issue.Link()
+	for _, item := range items {
+		r += ret + item.Link()
 		if ret == "" {
 			ret = "\n"
 		}
@@ -203,7 +205,7 @@ func main() {
 	// Phase 1: Gather information about PRs/Issues/Users
 
 	allUsers := make(Users)
-	var allIssues Issues
+	var allIssues Items
 
 	for _, ownerAndRepo := range repos {
 		t := strings.SplitN(ownerAndRepo, "/", 2)
@@ -223,7 +225,7 @@ func main() {
 		for _, issue := range ghissues {
 			// Only handle proper issues
 			if !issue.IsPullRequest() {
-				i := NewIssue(ctx, client, issue, ownerAndRepo, &allUsers)
+				i := NewItemFromIssue(ctx, client, issue, ownerAndRepo, &allUsers)
 				allIssues = append(allIssues, i)
 			}
 		}
