@@ -65,6 +65,24 @@ type Comment struct {
 	User      *User
 }
 
+// NewCommentFromPR creates a Comment from a GH pull request comment.
+func NewCommentFromPR(c *github.PullRequestComment, users *Users) *Comment {
+	comment := &Comment{CreatedAt: *c.CreatedAt}
+	if c.User != nil {
+		comment.User = users.Add(c.User)
+	}
+	return comment
+}
+
+// NewCommentFromReview creates a Comment from a GH pull request review.
+func NewCommentFromReview(c *github.PullRequestReview, users *Users) *Comment {
+	comment := &Comment{CreatedAt: *c.SubmittedAt}
+	if c.User != nil {
+		comment.User = users.Add(c.User)
+	}
+	return comment
+}
+
 // NewCommentFromIssue creates a Comment from a GH issue comment.
 func NewCommentFromIssue(c *github.IssueComment, users *Users) *Comment {
 	comment := &Comment{CreatedAt: *c.CreatedAt}
@@ -88,6 +106,61 @@ type Item struct {
 	UpdatedAt time.Time
 	ClosedAt  time.Time
 	Comments  []*Comment
+	// PR specific fields
+	Merged   bool
+	MergedBy *User
+}
+
+// NewItemFromPR creates an new Item and extracts some additional information
+func NewItemFromPR(ctx context.Context, client *github.Client, pr *github.PullRequest, repo string, users *Users) *Item {
+	i := &Item{PR: true,
+		ID:        fmt.Sprintf("%s#%d", repo, *pr.Number),
+		Repo:      repo,
+		Number:    *pr.Number,
+		State:     *pr.State,
+		Title:     *pr.Title,
+		URL:       *pr.HTMLURL,
+		CreatedAt: *pr.CreatedAt,
+	}
+
+	if pr.User != nil {
+		i.CreatedBy = users.Add(pr.User)
+	}
+	if pr.MergedBy != nil {
+		i.MergedBy = users.Add(pr.MergedBy)
+	}
+	if pr.UpdatedAt != nil {
+		i.UpdatedAt = *pr.UpdatedAt
+	}
+	if pr.ClosedAt != nil {
+		i.ClosedAt = *pr.ClosedAt
+	}
+	if pr.Merged != nil {
+		i.Merged = *pr.Merged
+	}
+
+	t := strings.SplitN(repo, "/", 2)
+
+	ghComments, _, err := client.PullRequests.ListComments(ctx, t[0], t[1], i.Number, nil)
+	if err != nil {
+		fmt.Println("Error getting comments for %s", i.ID)
+	} else {
+		for _, ghComment := range ghComments {
+			c := NewCommentFromPR(ghComment, users)
+			i.Comments = append(i.Comments, c)
+		}
+	}
+
+	ghReviews, _, err := client.PullRequests.ListReviews(ctx, t[0], t[1], i.Number, nil)
+	if err != nil {
+		fmt.Println("Error getting review comments for %s", i.ID)
+	} else {
+		for _, ghReview := range ghReviews {
+			c := NewCommentFromReview(ghReview, users)
+			i.Comments = append(i.Comments, c)
+		}
+	}
+	return i
 }
 
 // NewItemFromIssue creates an new Item and extracts some additional information
@@ -112,16 +185,14 @@ func NewItemFromIssue(ctx context.Context, client *github.Client, issue *github.
 		i.ClosedAt = *issue.ClosedAt
 	}
 
-	if *issue.Comments != 0 {
-		t := strings.SplitN(repo, "/", 2)
-		ghcomments, _, err := client.Issues.ListComments(ctx, t[0], t[1], i.Number, nil)
-		if err != nil {
-			fmt.Println("Error getting comments for %s", issue.ID)
-		} else {
-			for _, comment := range ghcomments {
-				c := NewCommentFromIssue(comment, users)
-				i.Comments = append(i.Comments, c)
-			}
+	t := strings.SplitN(repo, "/", 2)
+	ghComments, _, err := client.Issues.ListComments(ctx, t[0], t[1], i.Number, nil)
+	if err != nil {
+		fmt.Println("Error getting comments for %s", i.ID)
+	} else {
+		for _, ghComment := range ghComments {
+			c := NewCommentFromIssue(ghComment, users)
+			i.Comments = append(i.Comments, c)
 		}
 	}
 	return i
@@ -130,10 +201,14 @@ func NewItemFromIssue(ctx context.Context, client *github.Client, issue *github.
 func (i *Item) String() string {
 	ret := fmt.Sprintf("%s ([%s] %s", i.Title, i.ID, i.CreatedBy)
 
+	if i.MergedBy != nil {
+		ret += " " + i.MergedBy.String()
+	}
+
 	// Make the list of contributors unique
 	set := make(map[string]struct{})
 	for _, c := range i.Comments {
-		if c.User != i.CreatedBy {
+		if c.User != i.CreatedBy && c.User != i.MergedBy {
 			set[c.User.String()] = struct{}{}
 		}
 	}
@@ -205,6 +280,7 @@ func main() {
 	// Phase 1: Gather information about PRs/Issues/Users
 
 	allUsers := make(Users)
+	var allPRs Items
 	var allIssues Items
 
 	for _, ownerAndRepo := range repos {
@@ -215,18 +291,30 @@ func main() {
 		owner := t[0]
 		repo := t[1]
 
+		// Handle PRs
+		prOpts := &github.PullRequestListOptions{State: "all"}
+		ghPRs, _, err := client.PullRequests.List(ctx, owner, repo, prOpts)
+		if err != nil {
+			log.Printf("Error getting PRs for %s: %v", repo, err)
+			continue
+		}
+		for _, ghPR := range ghPRs {
+			pr := NewItemFromPR(ctx, client, ghPR, ownerAndRepo, &allUsers)
+			allPRs = append(allPRs, pr)
+		}
+
 		// Handle issues
-		listOpts := &github.IssueListByRepoOptions{State: "all"}
-		ghissues, _, err := client.Issues.ListByRepo(ctx, owner, repo, listOpts)
+		issueOpts := &github.IssueListByRepoOptions{State: "all"}
+		ghIssues, _, err := client.Issues.ListByRepo(ctx, owner, repo, issueOpts)
 		if err != nil {
 			log.Printf("Error getting issues for %s: %v", repo, err)
 			continue
 		}
-		for _, issue := range ghissues {
+		for _, ghIssue := range ghIssues {
 			// Only handle proper issues
-			if !issue.IsPullRequest() {
-				i := NewItemFromIssue(ctx, client, issue, ownerAndRepo, &allUsers)
-				allIssues = append(allIssues, i)
+			if !ghIssue.IsPullRequest() {
+				issue := NewItemFromIssue(ctx, client, ghIssue, ownerAndRepo, &allUsers)
+				allIssues = append(allIssues, issue)
 			}
 		}
 	}
@@ -234,9 +322,13 @@ func main() {
 	// Phase 2: Filter (TODO)
 
 	// Phase 3: Print output in markdown fragments
+	fmt.Println("## PRs:")
+	fmt.Println(allPRs)
+	fmt.Println()
 	fmt.Println("## Issues:")
 	fmt.Println(allIssues)
 	fmt.Println()
+	fmt.Println(allPRs.Links())
 	fmt.Println(allIssues.Links())
 	fmt.Println(allUsers.Links())
 }
