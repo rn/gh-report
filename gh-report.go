@@ -58,6 +58,21 @@ func (users Users) Links() string {
 	return r
 }
 
+// Comment represents a Comment on a Issue or PR
+type Comment struct {
+	comment *github.IssueComment
+	User    *User
+}
+
+// NewComment creates a Comment from a GH comment.
+func NewComment(c *github.IssueComment, users *Users) *Comment {
+	comment := &Comment{comment: c}
+	if c.User != nil {
+		comment.User = users.Add(c.User)
+	}
+	return comment
+}
+
 // Item has some fields extracted from GitHub issue (PRs are issues too)
 type Item struct {
 	issue     *github.Issue
@@ -69,10 +84,11 @@ type Item struct {
 	Title     string
 	URL       string
 	CreatedBy *User
+	Comments  []*Comment
 }
 
 // NewItem creates an new Item and extracts some additional information
-func NewItem(issue *github.Issue, repo string, users *Users) *Item {
+func NewItem(ctx context.Context, client *github.Client, issue *github.Issue, repo string, users *Users) *Item {
 	item := &Item{issue: issue,
 		ID:     fmt.Sprintf("%s#%d", repo, *issue.Number),
 		Repo:   repo,
@@ -86,11 +102,36 @@ func NewItem(issue *github.Issue, repo string, users *Users) *Item {
 	if issue.User != nil {
 		item.CreatedBy = users.Add(issue.User)
 	}
+
+	if *issue.Comments != 0 {
+		t := strings.SplitN(repo, "/", 2)
+		ghcomments, _, err := client.Issues.ListComments(ctx, t[0], t[1], item.Number, nil)
+		if err != nil {
+			fmt.Println("Error getting comments for %s", item.ID)
+		} else {
+			for _, comment := range ghcomments {
+				c := NewComment(comment, users)
+				item.Comments = append(item.Comments, c)
+			}
+		}
+	}
 	return item
 }
 
 func (i *Item) String() string {
-	return fmt.Sprintf("%s ([%s] %s)", i.Title, i.ID, i.CreatedBy)
+	ret := fmt.Sprintf("%s ([%s] %s", i.Title, i.ID, i.CreatedBy)
+
+	// Make the list of contributors unique
+	set := make(map[string]struct{})
+	for _, c := range i.Comments {
+		if c.User != i.CreatedBy {
+			set[c.User.String()] = struct{}{}
+		}
+	}
+	for u := range set {
+		ret += " " + u
+	}
+	return ret + ")"
 }
 
 // Link returns a markdown style link to the item
@@ -173,7 +214,7 @@ func main() {
 			continue
 		}
 		for _, issue := range ghissues {
-			i := NewItem(issue, ownerAndRepo, &allUsers)
+			i := NewItem(ctx, client, issue, ownerAndRepo, &allUsers)
 			if i.PR {
 				allPRs = append(allPRs, i)
 			} else {
