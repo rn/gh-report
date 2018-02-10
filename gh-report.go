@@ -7,6 +7,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
@@ -60,12 +61,13 @@ func (users Users) Links() string {
 
 // Comment represents a Comment on a Issue or PR
 type Comment struct {
-	User *User
+	CreatedAt time.Time
+	User      *User
 }
 
 // NewComment creates a Comment from a GH comment.
 func NewComment(c *github.IssueComment, users *Users) *Comment {
-	comment := &Comment{}
+	comment := &Comment{CreatedAt: *c.CreatedAt}
 	if c.User != nil {
 		comment.User = users.Add(c.User)
 	}
@@ -82,22 +84,32 @@ type Item struct {
 	Title     string
 	URL       string
 	CreatedBy *User
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ClosedAt  time.Time
 	Comments  []*Comment
 }
 
 // NewItem creates an new Item and extracts some additional information
 func NewItem(ctx context.Context, client *github.Client, issue *github.Issue, repo string, users *Users) *Item {
 	item := &Item{ID: fmt.Sprintf("%s#%d", repo, *issue.Number),
-		Repo:   repo,
-		Number: *issue.Number,
-		PR:     issue.IsPullRequest(),
-		State:  *issue.State,
-		Title:  *issue.Title,
-		URL:    *issue.HTMLURL,
+		Repo:      repo,
+		Number:    *issue.Number,
+		PR:        issue.IsPullRequest(),
+		State:     *issue.State,
+		Title:     *issue.Title,
+		URL:       *issue.HTMLURL,
+		CreatedAt: *issue.CreatedAt,
 	}
 
 	if issue.User != nil {
 		item.CreatedBy = users.Add(issue.User)
+	}
+	if issue.UpdatedAt != nil {
+		item.UpdatedAt = *issue.UpdatedAt
+	}
+	if issue.ClosedAt != nil {
+		item.ClosedAt = *issue.ClosedAt
 	}
 
 	if *issue.Comments != 0 {
