@@ -28,7 +28,7 @@ func (u *User) String() string {
 	return "[@" + u.ID + "]"
 }
 
-// Link returns a markdown style link to the item
+// Link returns a markdown style link to the user
 func (u *User) Link() string {
 	return fmt.Sprintf("[@%s]: %s", u.ID, u.URL)
 }
@@ -65,7 +65,7 @@ type Comment struct {
 	User      *User
 }
 
-// NewComment creates a Comment from a GH comment.
+// NewComment creates a Comment from a GH issue comment.
 func NewComment(c *github.IssueComment, users *Users) *Comment {
 	comment := &Comment{CreatedAt: *c.CreatedAt}
 	if c.User != nil {
@@ -74,12 +74,11 @@ func NewComment(c *github.IssueComment, users *Users) *Comment {
 	return comment
 }
 
-// Item has some fields extracted from GitHub issue (PRs are issues too)
-type Item struct {
+// Issue has some fields extracted from GitHub issue
+type Issue struct {
 	ID        string
 	Repo      string
 	Number    int
-	PR        bool
 	State     string
 	Title     string
 	URL       string
@@ -90,12 +89,11 @@ type Item struct {
 	Comments  []*Comment
 }
 
-// NewItem creates an new Item and extracts some additional information
-func NewItem(ctx context.Context, client *github.Client, issue *github.Issue, repo string, users *Users) *Item {
-	item := &Item{ID: fmt.Sprintf("%s#%d", repo, *issue.Number),
+// NewIssue creates an new Issue and extracts some additional information
+func NewIssue(ctx context.Context, client *github.Client, issue *github.Issue, repo string, users *Users) *Issue {
+	i := &Issue{ID: fmt.Sprintf("%s#%d", repo, *issue.Number),
 		Repo:      repo,
 		Number:    *issue.Number,
-		PR:        issue.IsPullRequest(),
 		State:     *issue.State,
 		Title:     *issue.Title,
 		URL:       *issue.HTMLURL,
@@ -103,31 +101,31 @@ func NewItem(ctx context.Context, client *github.Client, issue *github.Issue, re
 	}
 
 	if issue.User != nil {
-		item.CreatedBy = users.Add(issue.User)
+		i.CreatedBy = users.Add(issue.User)
 	}
 	if issue.UpdatedAt != nil {
-		item.UpdatedAt = *issue.UpdatedAt
+		i.UpdatedAt = *issue.UpdatedAt
 	}
 	if issue.ClosedAt != nil {
-		item.ClosedAt = *issue.ClosedAt
+		i.ClosedAt = *issue.ClosedAt
 	}
 
 	if *issue.Comments != 0 {
 		t := strings.SplitN(repo, "/", 2)
-		ghcomments, _, err := client.Issues.ListComments(ctx, t[0], t[1], item.Number, nil)
+		ghcomments, _, err := client.Issues.ListComments(ctx, t[0], t[1], i.Number, nil)
 		if err != nil {
-			fmt.Println("Error getting comments for %s", item.ID)
+			fmt.Println("Error getting comments for %s", issue.ID)
 		} else {
 			for _, comment := range ghcomments {
 				c := NewComment(comment, users)
-				item.Comments = append(item.Comments, c)
+				i.Comments = append(i.Comments, c)
 			}
 		}
 	}
-	return item
+	return i
 }
 
-func (i *Item) String() string {
+func (i *Issue) String() string {
 	ret := fmt.Sprintf("%s ([%s] %s", i.Title, i.ID, i.CreatedBy)
 
 	// Make the list of contributors unique
@@ -143,27 +141,27 @@ func (i *Item) String() string {
 	return ret + ")"
 }
 
-// Link returns a markdown style link to the item
-func (i *Item) Link() string {
+// Link returns a markdown style link to the issue
+func (i *Issue) Link() string {
 	return fmt.Sprintf("[%s]: %s", i.ID, i.URL)
 }
 
-// Items is a map of items
-type Items []*Item
+// Issues is a map of issues
+type Issues []*Issue
 
-// String return a string of a sorted list of Items in markdown
-func (items Items) String() string {
-	// Sort slice: If the items are from the same repo, use the number otherwise use the repo name.
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Repo != items[j].Repo {
-			return items[i].Repo < items[j].Repo
+// String return a string of a sorted list of Issues in markdown
+func (issues Issues) String() string {
+	// Sort slice: If the issues are from the same repo, use the number otherwise use the repo name.
+	sort.Slice(issues, func(i, j int) bool {
+		if issues[i].Repo != issues[j].Repo {
+			return issues[i].Repo < issues[j].Repo
 		}
-		return items[i].Number < items[j].Number
+		return issues[i].Number < issues[j].Number
 	})
 	var ret string
 	var r string
-	for _, item := range items {
-		r += ret + "- " + item.String()
+	for _, issue := range issues {
+		r += ret + "- " + issue.String()
 		if ret == "" {
 			ret = "\n"
 		}
@@ -172,11 +170,11 @@ func (items Items) String() string {
 }
 
 // Links returns a string with markdown links to all issues
-func (items Items) Links() string {
+func (issues Issues) Links() string {
 	var ret string
 	var r string
-	for _, item := range items {
-		r += ret + item.Link()
+	for _, issue := range issues {
+		r += ret + issue.Link()
 		if ret == "" {
 			ret = "\n"
 		}
@@ -205,8 +203,7 @@ func main() {
 	// Phase 1: Gather information about PRs/Issues/Users
 
 	allUsers := make(Users)
-	var allPRs Items
-	var allIssues Items
+	var allIssues Issues
 
 	for _, ownerAndRepo := range repos {
 		t := strings.SplitN(ownerAndRepo, "/", 2)
@@ -216,6 +213,7 @@ func main() {
 		owner := t[0]
 		repo := t[1]
 
+		// Handle issues
 		listOpts := &github.IssueListByRepoOptions{State: "all"}
 		ghissues, _, err := client.Issues.ListByRepo(ctx, owner, repo, listOpts)
 		if err != nil {
@@ -223,10 +221,9 @@ func main() {
 			continue
 		}
 		for _, issue := range ghissues {
-			i := NewItem(ctx, client, issue, ownerAndRepo, &allUsers)
-			if i.PR {
-				allPRs = append(allPRs, i)
-			} else {
+			// Only handle proper issues
+			if !issue.IsPullRequest() {
+				i := NewIssue(ctx, client, issue, ownerAndRepo, &allUsers)
 				allIssues = append(allIssues, i)
 			}
 		}
@@ -235,13 +232,9 @@ func main() {
 	// Phase 2: Filter (TODO)
 
 	// Phase 3: Print output in markdown fragments
-	fmt.Println("## PRs:")
-	fmt.Println(allPRs)
-	fmt.Println()
 	fmt.Println("## Issues:")
 	fmt.Println(allIssues)
 	fmt.Println()
-	fmt.Println(allPRs.Links())
 	fmt.Println(allIssues.Links())
 	fmt.Println(allUsers.Links())
 }
