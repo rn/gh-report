@@ -99,21 +99,21 @@ func (i *Item) Link() string {
 }
 
 // Items is a map of items
-type Items map[string]*Item
+type Items []*Item
 
 // String return a string of a sorted list of Items in markdown
 func (items Items) String() string {
-	// TODO(rn): Sort by repo name and then numerically
-	var keys []string
-	for k := range items {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
+	// Sort slice: If the items are from the same repo, use the number otherwise use the repo name.
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Repo != items[j].Repo {
+			return items[i].Repo < items[j].Repo
+		}
+		return items[i].Number < items[j].Number
+	})
 	var ret string
 	var r string
-	for _, item := range keys {
-		r += ret + "- " + items[item].String()
+	for _, item := range items {
+		r += ret + "- " + item.String()
 		if ret == "" {
 			ret = "\n"
 		}
@@ -155,8 +155,8 @@ func main() {
 	// Phase 1: Gather information about PRs/Issues/Users
 
 	allUsers := make(Users)
-	allPRs := make(Items)
-	allIssues := make(Items)
+	var allPRs Items
+	var allIssues Items
 
 	for _, ownerAndRepo := range repos {
 		t := strings.SplitN(ownerAndRepo, "/", 2)
@@ -175,9 +175,9 @@ func main() {
 		for _, issue := range ghissues {
 			i := NewItem(issue, ownerAndRepo, &allUsers)
 			if i.PR {
-				allPRs[i.ID] = i
+				allPRs = append(allPRs, i)
 			} else {
-				allIssues[i.ID] = i
+				allIssues = append(allIssues, i)
 			}
 		}
 	}
