@@ -60,13 +60,12 @@ func (users Users) Links() string {
 
 // Comment represents a Comment on a Issue or PR
 type Comment struct {
-	comment *github.IssueComment
-	User    *User
+	User *User
 }
 
 // NewComment creates a Comment from a GH comment.
 func NewComment(c *github.IssueComment, users *Users) *Comment {
-	comment := &Comment{comment: c}
+	comment := &Comment{}
 	if c.User != nil {
 		comment.User = users.Add(c.User)
 	}
@@ -75,7 +74,6 @@ func NewComment(c *github.IssueComment, users *Users) *Comment {
 
 // Item has some fields extracted from GitHub issue (PRs are issues too)
 type Item struct {
-	issue     *github.Issue
 	ID        string
 	Repo      string
 	Number    int
@@ -89,8 +87,7 @@ type Item struct {
 
 // NewItem creates an new Item and extracts some additional information
 func NewItem(ctx context.Context, client *github.Client, issue *github.Issue, repo string, users *Users) *Item {
-	item := &Item{issue: issue,
-		ID:     fmt.Sprintf("%s#%d", repo, *issue.Number),
+	item := &Item{ID: fmt.Sprintf("%s#%d", repo, *issue.Number),
 		Repo:   repo,
 		Number: *issue.Number,
 		PR:     issue.IsPullRequest(),
