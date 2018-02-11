@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +13,21 @@ import (
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 )
+
+// Simple logging to stderr
+var logLevel int
+
+func infof(format string, v ...interface{}) {
+	if logLevel >= 1 {
+		fmt.Fprintf(os.Stderr, format, v...)
+	}
+}
+
+func debugf(format string, v ...interface{}) {
+	if logLevel >= 2 {
+		fmt.Fprintf(os.Stderr, format, v...)
+	}
+}
 
 // User is a structure with information about a user
 type User struct {
@@ -38,11 +54,13 @@ type Users map[string]*User
 
 // Add adds a GH user to a map of Users if the user does not exist
 func (users Users) Add(u *github.User) *User {
+	debugf("Added user: %s\n", *u.Login)
 	if user, ok := users[*u.Login]; ok {
 		return user
 	}
 	user := NewUser(u)
 	users[user.ID] = user
+	infof("Added new user: %s\n", user.ID)
 	return user
 }
 
@@ -261,11 +279,13 @@ func (items Items) Links() string {
 
 func main() {
 	accessToken := flag.String("token", "", "GitHub access token")
+	verbose := flag.Int("v", 0, "Verbosity level")
 	flag.Parse()
 
 	if *accessToken == "" {
 		log.Fatal("Please specify a access token")
 	}
+	logLevel = *verbose
 
 	repos := flag.Args()
 
@@ -292,6 +312,7 @@ func main() {
 		repo := t[1]
 
 		// Handle PRs
+		infof("Handling PRs:\n")
 		prOpts := &github.PullRequestListOptions{State: "all"}
 		ghPRs, _, err := client.PullRequests.List(ctx, owner, repo, prOpts)
 		if err != nil {
@@ -299,11 +320,14 @@ func main() {
 			continue
 		}
 		for _, ghPR := range ghPRs {
+			infof("Handle PR: %s#%d %s\n", ownerAndRepo, *ghPR.Number, *ghPR.Title)
+			debugf("%+v\n\n", ghPR)
 			pr := NewItemFromPR(ctx, client, ghPR, ownerAndRepo, &allUsers)
 			allPRs = append(allPRs, pr)
 		}
 
 		// Handle issues
+		infof("Handling Issues:\n")
 		issueOpts := &github.IssueListByRepoOptions{State: "all"}
 		ghIssues, _, err := client.Issues.ListByRepo(ctx, owner, repo, issueOpts)
 		if err != nil {
@@ -313,6 +337,8 @@ func main() {
 		for _, ghIssue := range ghIssues {
 			// Only handle proper issues
 			if !ghIssue.IsPullRequest() {
+				infof("Handle Issue: %s#%d %s\n", ownerAndRepo, *ghIssue.Number, *ghIssue.Title)
+				debugf("%+v\n\n", ghIssue)
 				issue := NewItemFromIssue(ctx, client, ghIssue, ownerAndRepo, &allUsers)
 				allIssues = append(allIssues, issue)
 			}
