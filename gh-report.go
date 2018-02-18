@@ -17,6 +17,10 @@ import (
 // Simple logging to stderr
 var logLevel int
 
+func warnf(format string, v ...interface{}) {
+	fmt.Fprintf(os.Stderr, format, v...)
+}
+
 func infof(format string, v ...interface{}) {
 	if logLevel >= 1 {
 		fmt.Fprintf(os.Stderr, format, v...)
@@ -27,6 +31,30 @@ func debugf(format string, v ...interface{}) {
 	if logLevel >= 2 {
 		fmt.Fprintf(os.Stderr, format, v...)
 	}
+}
+
+// Perform a GitHub API List operation considering paging and rate limiting
+// If op() returns nil, we are done too
+func doListOp(op func(page int) (*github.Response, error)) error {
+	for page := 1; page != 0; {
+		r, err := op(page)
+		if err != nil {
+			return err
+		}
+		if r == nil {
+			break
+		}
+		infof("  doListOp: Response Page:%d Rate:%d/%d Reset:%s\n", r.NextPage, r.Limit, r.Remaining, r.Reset)
+
+		page = r.NextPage
+		// Handle rate limiting
+		if r.Remaining == 0 {
+			warnf("No more request this period. Limit %d reset at %s\n", r.Limit, r.Reset)
+			warnf("Sleep for %s\n", time.Until(r.Reset.Time)+(5*time.Second))
+			time.Sleep(time.Until(r.Reset.Time) + (5 * time.Second))
+		}
+	}
+	return nil
 }
 
 // User is a structure with information about a user
@@ -54,13 +82,13 @@ type Users map[string]*User
 
 // Add adds a GH user to a map of Users if the user does not exist
 func (users Users) Add(u *github.User) *User {
-	debugf("Added user: %s\n", *u.Login)
+	debugf("  Add user: %s\n", *u.Login)
 	if user, ok := users[*u.Login]; ok {
 		return user
 	}
 	user := NewUser(u)
 	users[user.ID] = user
-	infof("Added new user: %s\n", user.ID)
+	infof("  Added new user: %s\n", user.ID)
 	return user
 }
 
@@ -159,25 +187,34 @@ func NewItemFromPR(ctx context.Context, client *github.Client, pr *github.PullRe
 
 	t := strings.SplitN(repo, "/", 2)
 
-	ghComments, _, err := client.PullRequests.ListComments(ctx, t[0], t[1], i.Number, nil)
-	if err != nil {
-		fmt.Println("Error getting comments for %s", i.ID)
-	} else {
+	doListOp(func(page int) (*github.Response, error) {
+		commentOpts := &github.PullRequestListCommentsOptions{}
+		commentOpts.ListOptions.Page = page
+		ghComments, resp, err := client.PullRequests.ListComments(ctx, t[0], t[1], i.Number, commentOpts)
+		if err != nil {
+			fmt.Println("Error getting comments for %s", i.ID)
+			return nil, err
+		}
 		for _, ghComment := range ghComments {
 			c := NewCommentFromPR(ghComment, users)
 			i.Comments = append(i.Comments, c)
 		}
-	}
+		return resp, nil
+	})
 
-	ghReviews, _, err := client.PullRequests.ListReviews(ctx, t[0], t[1], i.Number, nil)
-	if err != nil {
-		fmt.Println("Error getting review comments for %s", i.ID)
-	} else {
+	doListOp(func(page int) (*github.Response, error) {
+		reviewOpts := &github.ListOptions{Page: page}
+		ghReviews, resp, err := client.PullRequests.ListReviews(ctx, t[0], t[1], i.Number, reviewOpts)
+		if err != nil {
+			fmt.Println("Error getting review comments for %s", i.ID)
+			return nil, err
+		}
 		for _, ghReview := range ghReviews {
 			c := NewCommentFromReview(ghReview, users)
 			i.Comments = append(i.Comments, c)
 		}
-	}
+		return resp, nil
+	})
 	return i
 }
 
@@ -204,15 +241,20 @@ func NewItemFromIssue(ctx context.Context, client *github.Client, issue *github.
 	}
 
 	t := strings.SplitN(repo, "/", 2)
-	ghComments, _, err := client.Issues.ListComments(ctx, t[0], t[1], i.Number, nil)
-	if err != nil {
-		fmt.Println("Error getting comments for %s", i.ID)
-	} else {
+	doListOp(func(page int) (*github.Response, error) {
+		commentOpts := &github.IssueListCommentsOptions{}
+		commentOpts.ListOptions.Page = page
+		ghComments, resp, err := client.Issues.ListComments(ctx, t[0], t[1], i.Number, commentOpts)
+		if err != nil {
+			fmt.Println("Error getting comments for %s", i.ID)
+			return nil, err
+		}
 		for _, ghComment := range ghComments {
 			c := NewCommentFromIssue(ghComment, users)
 			i.Comments = append(i.Comments, c)
 		}
-	}
+		return resp, nil
+	})
 	return i
 }
 
@@ -279,6 +321,7 @@ func (items Items) Links() string {
 
 func main() {
 	accessToken := flag.String("token", "", "GitHub access token")
+	numItems := flag.Int("i", 50, "Number of PRs and Issues to procees")
 	verbose := flag.Int("v", 0, "Verbosity level")
 	flag.Parse()
 
@@ -313,35 +356,57 @@ func main() {
 
 		// Handle PRs
 		infof("Handling PRs:\n")
-		prOpts := &github.PullRequestListOptions{State: "all"}
-		ghPRs, _, err := client.PullRequests.List(ctx, owner, repo, prOpts)
+		err := doListOp(func(page int) (*github.Response, error) {
+			prOpts := &github.PullRequestListOptions{State: "all", Sort: "updated", Direction: "desc"}
+			prOpts.ListOptions.Page = page
+			ghPRs, resp, err := client.PullRequests.List(ctx, owner, repo, prOpts)
+			if err != nil {
+				log.Printf("Error getting PRs for %s: %v", repo, err)
+				return nil, err
+			}
+			for _, ghPR := range ghPRs {
+				infof("Handle PR: %s#%d %s\n", ownerAndRepo, *ghPR.Number, *ghPR.Title)
+				debugf("%+v\n\n", ghPR)
+				pr := NewItemFromPR(ctx, client, ghPR, ownerAndRepo, &allUsers)
+				allPRs = append(allPRs, pr)
+				// XXX Temporary limit
+				if len(allPRs) >= *numItems {
+					return nil, nil
+				}
+			}
+			return resp, nil
+		})
 		if err != nil {
 			log.Printf("Error getting PRs for %s: %v", repo, err)
-			continue
-		}
-		for _, ghPR := range ghPRs {
-			infof("Handle PR: %s#%d %s\n", ownerAndRepo, *ghPR.Number, *ghPR.Title)
-			debugf("%+v\n\n", ghPR)
-			pr := NewItemFromPR(ctx, client, ghPR, ownerAndRepo, &allUsers)
-			allPRs = append(allPRs, pr)
 		}
 
 		// Handle issues
 		infof("Handling Issues:\n")
-		issueOpts := &github.IssueListByRepoOptions{State: "all"}
-		ghIssues, _, err := client.Issues.ListByRepo(ctx, owner, repo, issueOpts)
-		if err != nil {
-			log.Printf("Error getting issues for %s: %v", repo, err)
-			continue
-		}
-		for _, ghIssue := range ghIssues {
-			// Only handle proper issues
-			if !ghIssue.IsPullRequest() {
-				infof("Handle Issue: %s#%d %s\n", ownerAndRepo, *ghIssue.Number, *ghIssue.Title)
-				debugf("%+v\n\n", ghIssue)
-				issue := NewItemFromIssue(ctx, client, ghIssue, ownerAndRepo, &allUsers)
-				allIssues = append(allIssues, issue)
+		err = doListOp(func(page int) (*github.Response, error) {
+			issueOpts := &github.IssueListByRepoOptions{State: "all", Sort: "updated", Direction: "desc"}
+			issueOpts.ListOptions.Page = page
+			ghIssues, resp, err := client.Issues.ListByRepo(ctx, owner, repo, issueOpts)
+			if err != nil {
+				log.Printf("Error getting issues for %s: %v", repo, err)
+				return nil, err
 			}
+			for _, ghIssue := range ghIssues {
+				// Only handle proper issues
+				if !ghIssue.IsPullRequest() {
+					infof("Handle Issue: %s#%d %s\n", ownerAndRepo, *ghIssue.Number, *ghIssue.Title)
+					debugf("%+v\n\n", ghIssue)
+					issue := NewItemFromIssue(ctx, client, ghIssue, ownerAndRepo, &allUsers)
+					allIssues = append(allIssues, issue)
+					// XXX Temporary limit
+					if len(allIssues) >= *numItems {
+						return nil, nil
+					}
+				}
+			}
+			return resp, nil
+		})
+		if err != nil {
+			log.Printf("Error getting Issues for %s: %v", repo, err)
 		}
 	}
 
