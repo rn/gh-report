@@ -131,6 +131,7 @@ type Item struct {
 	Comments  []*Comment
 	// PR specific fields
 	Merged   bool
+	MergedAt time.Time
 	MergedBy *User
 }
 
@@ -160,6 +161,11 @@ func NewItemFromPR(ctx context.Context, client *github.Client, pr *github.PullRe
 	}
 	if pr.Merged != nil {
 		i.Merged = *pr.Merged
+	}
+	if pr.MergedAt != nil {
+		i.MergedAt = *pr.MergedAt
+		// Sometimes pr.Merged does not seem to be set.
+		i.Merged = true
 	}
 
 	t := strings.SplitN(repo, "/", 2)

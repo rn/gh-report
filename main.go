@@ -45,6 +45,11 @@ func NewPeriodFromMonth(in string) (*Period, error) {
 	return p, nil
 }
 
+// Match returns true if t falls within the period
+func (p *Period) Match(t time.Time) bool {
+	return t.After(p.Start) && t.Before(p.End)
+}
+
 func main() {
 	accessToken := flag.String("token", "", "GitHub access token")
 	monthly := flag.String("monthly", "", "Month to generate the report for, e.g. 01-2018")
@@ -104,16 +109,80 @@ func main() {
 		}
 	}
 
-	// Phase 2: Filter (TODO)
+	// Phase 2: Filter
+
+	var mergedPRs Items
+	var openedPRs Items
+	var closedIssues Items
+	var openedIssues Items
+	var contributions int
+	contributors := make(Users)
+	users := make(Users)
+
+	for _, i := range append(allPRs, allIssues...) {
+		infof("Processing: %s\n", i)
+		users[i.CreatedBy.ID] = i.CreatedBy
+		if period.Match(i.CreatedAt) {
+			contributions++
+			contributors[i.CreatedBy.ID] = i.CreatedBy
+		}
+		for _, comment := range i.Comments {
+			if period.Match(comment.CreatedAt) {
+				contributions++
+				contributors[i.CreatedBy.ID] = i.CreatedBy
+			}
+			users[comment.User.ID] = comment.User
+		}
+
+		if i.PR {
+			if period.Match(i.CreatedAt) {
+				openedPRs = append(openedPRs, i)
+			}
+			if period.Match(i.ClosedAt) && i.Merged {
+				mergedPRs = append(mergedPRs, i)
+				contributions++
+				// Sigh...sometimes MergedBy is not filled in
+				if i.MergedBy != nil {
+					users[i.MergedBy.ID] = i.MergedBy
+					contributors[i.MergedBy.ID] = i.MergedBy
+				}
+			}
+		} else {
+			if period.Match(i.CreatedAt) {
+				openedIssues = append(openedIssues, i)
+			}
+			if period.Match(i.ClosedAt) {
+				closedIssues = append(closedIssues, i)
+			}
+		}
+	}
 
 	// Phase 3: Print output in markdown fragments
-	fmt.Println("## PRs:")
-	fmt.Println(allPRs)
+
+	fmt.Printf("# Report for %s\n", *monthly)
+
+	fmt.Printf("This report covers the following repositories:")
+	for _, ownerAndRepo := range repos {
+		fmt.Printf(" [%s]", ownerAndRepo)
+	}
 	fmt.Println()
-	fmt.Println("## Issues:")
-	fmt.Println(allIssues)
+	fmt.Printf("In the reporting period there were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d issues were opened and %d issues were closed.\n", contributions, len(contributors), len(openedPRs), len(mergedPRs), len(openedIssues), len(closedIssues))
 	fmt.Println()
-	fmt.Println(allPRs.Links())
-	fmt.Println(allIssues.Links())
-	fmt.Println(allUsers.Links())
+
+	fmt.Println("## Merged PRs:")
+	fmt.Println(mergedPRs)
+	fmt.Println()
+	fmt.Println("## Closed Issues:")
+	fmt.Println(closedIssues)
+	fmt.Println()
+	fmt.Println("## Opened Issues:")
+	fmt.Println(openedIssues)
+	fmt.Println()
+	for _, ownerAndRepo := range repos {
+		fmt.Printf("[%s]: https://github.com/%s\n", ownerAndRepo, ownerAndRepo)
+	}
+	fmt.Println(mergedPRs.Links())
+	fmt.Println(closedIssues.Links())
+	fmt.Println(openedIssues.Links())
+	fmt.Println(users.Links())
 }
