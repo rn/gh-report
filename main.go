@@ -5,15 +5,49 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 )
 
+// Period defines a time period
+type Period struct {
+	Start time.Time
+	End   time.Time
+}
+
+// daysIn returns the number of days in a month for a given year.
+// From: https://groups.google.com/forum/#!topic/golang-nuts/W-ezk71hioo
+func daysIn(year int, m time.Month) int {
+	// This is equivalent to time.daysIn(m, year).
+	return time.Date(year, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+// NewPeriodFromMonth coverts a string of the form month-year into a period with the start/end of the month
+func NewPeriodFromMonth(in string) (*Period, error) {
+	o := strings.SplitN(in, "-", 2)
+	m, err := strconv.Atoi(o[0])
+	if err != nil {
+		return nil, err
+	}
+	month := time.Month(m)
+	year, err := strconv.Atoi(o[1])
+	if err != nil {
+		return nil, err
+	}
+
+	p := &Period{}
+	p.Start = time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	p.End = time.Date(year, month, daysIn(year, month), 23, 59, 59, 0, time.UTC)
+	return p, nil
+}
+
 func main() {
 	accessToken := flag.String("token", "", "GitHub access token")
-	numItems := flag.Int("i", 50, "Number of PRs and Issues to procees")
+	monthly := flag.String("monthly", "", "Month to generate the report for, e.g. 01-2018")
 	verbose := flag.Int("v", 0, "Verbosity level")
 	flag.Parse()
 
@@ -21,6 +55,15 @@ func main() {
 		log.Fatal("Please specify a access token")
 	}
 	logLevel = *verbose
+
+	var period *Period
+	if *monthly != "" {
+		var err error
+		if period, err = NewPeriodFromMonth(*monthly); err != nil {
+			log.Fatal("Error parsing monthly", err)
+		}
+	}
+	fmt.Printf("FROM %s TO %s\n", period.Start, period.End)
 
 	repos := flag.Args()
 
@@ -60,11 +103,12 @@ func main() {
 				infof("Handle PR: %s#%d %s\n", ownerAndRepo, *ghPR.Number, *ghPR.Title)
 				debugf("%+v\n\n", ghPR)
 				pr := NewItemFromPR(ctx, client, ghPR, ownerAndRepo, &allUsers)
-				allPRs = append(allPRs, pr)
-				// XXX Temporary limit
-				if len(allPRs) >= *numItems {
+				// The List options for PRs does not have a Since field (like Issues),
+				// so check here when to break.
+				if pr.CreatedAt.Before(period.Start) && pr.UpdatedAt.Before(period.Start) && pr.ClosedAt.Before(period.Start) {
 					return nil, nil
 				}
+				allPRs = append(allPRs, pr)
 			}
 			return resp, nil
 		})
@@ -75,7 +119,12 @@ func main() {
 		// Handle issues
 		infof("Handling Issues:\n")
 		err = doListOp(func(page int) (*github.Response, error) {
-			issueOpts := &github.IssueListByRepoOptions{State: "all", Sort: "updated", Direction: "desc"}
+			issueOpts := &github.IssueListByRepoOptions{
+				State:     "all",
+				Sort:      "updated",
+				Direction: "desc",
+				Since:     period.Start,
+			}
 			issueOpts.ListOptions.Page = page
 			ghIssues, resp, err := client.Issues.ListByRepo(ctx, owner, repo, issueOpts)
 			if err != nil {
@@ -89,10 +138,6 @@ func main() {
 					debugf("%+v\n\n", ghIssue)
 					issue := NewItemFromIssue(ctx, client, ghIssue, ownerAndRepo, &allUsers)
 					allIssues = append(allIssues, issue)
-					// XXX Temporary limit
-					if len(allIssues) >= *numItems {
-						return nil, nil
-					}
 				}
 			}
 			return resp, nil
