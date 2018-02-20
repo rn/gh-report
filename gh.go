@@ -295,3 +295,60 @@ func (items Items) Links() string {
 	}
 	return r
 }
+
+// GetPRs gets a list of PRs and users involved since a given time
+func GetPRs(ctx context.Context, client *github.Client, owner, repo string, since *time.Time, prs *Items, users *Users) error {
+	err := doListOp(func(page int) (*github.Response, error) {
+		prOpts := &github.PullRequestListOptions{State: "all", Sort: "updated", Direction: "desc"}
+		prOpts.ListOptions.Page = page
+		ghPRs, resp, err := client.PullRequests.List(ctx, owner, repo, prOpts)
+		if err != nil {
+			warnf("Error getting PRs for %s: %v", repo, err)
+			return nil, err
+		}
+		for _, ghPR := range ghPRs {
+			infof("Handle PR: %s/%s#%d %s\n", owner, repo, *ghPR.Number, *ghPR.Title)
+			debugf("%+v\n\n", ghPR)
+			pr := NewItemFromPR(ctx, client, ghPR, fmt.Sprintf("%s/%s", owner, repo), users)
+			// The List options for PRs does not have a Since field (like Issues),
+			// so check here when to break.
+			if since != nil && pr.CreatedAt.Before(*since) && pr.UpdatedAt.Before(*since) && pr.ClosedAt.Before(*since) {
+				return nil, nil
+			}
+			*prs = append(*prs, pr)
+		}
+		return resp, nil
+	})
+	return err
+}
+
+// GetIssues gets a list of Issues and users involved since a given time
+func GetIssues(ctx context.Context, client *github.Client, owner, repo string, since *time.Time, issues *Items, users *Users) error {
+	err := doListOp(func(page int) (*github.Response, error) {
+		issueOpts := &github.IssueListByRepoOptions{
+			State:     "all",
+			Sort:      "updated",
+			Direction: "desc",
+		}
+		if since != nil {
+			issueOpts.Since = *since
+		}
+		issueOpts.ListOptions.Page = page
+		ghIssues, resp, err := client.Issues.ListByRepo(ctx, owner, repo, issueOpts)
+		if err != nil {
+			warnf("Error getting issues for %s/%s: %v", owner, repo, err)
+			return nil, err
+		}
+		for _, ghIssue := range ghIssues {
+			// Only handle proper issues
+			if !ghIssue.IsPullRequest() {
+				infof("Handle Issue: %s/%s#%d %s\n", owner, repo, *ghIssue.Number, *ghIssue.Title)
+				debugf("%+v\n\n", ghIssue)
+				issue := NewItemFromIssue(ctx, client, ghIssue, fmt.Sprintf("%s/%s", owner, repo), users)
+				*issues = append(*issues, issue)
+			}
+		}
+		return resp, nil
+	})
+	return err
+}

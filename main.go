@@ -57,11 +57,13 @@ func main() {
 	logLevel = *verbose
 
 	var period *Period
+	var since *time.Time
 	if *monthly != "" {
 		var err error
 		if period, err = NewPeriodFromMonth(*monthly); err != nil {
 			log.Fatal("Error parsing monthly", err)
 		}
+		since = &period.Start
 	}
 	fmt.Printf("FROM %s TO %s\n", period.Start, period.End)
 
@@ -90,59 +92,14 @@ func main() {
 		repo := t[1]
 
 		// Handle PRs
-		infof("Handling PRs:\n")
-		err := doListOp(func(page int) (*github.Response, error) {
-			prOpts := &github.PullRequestListOptions{State: "all", Sort: "updated", Direction: "desc"}
-			prOpts.ListOptions.Page = page
-			ghPRs, resp, err := client.PullRequests.List(ctx, owner, repo, prOpts)
-			if err != nil {
-				log.Printf("Error getting PRs for %s: %v", repo, err)
-				return nil, err
-			}
-			for _, ghPR := range ghPRs {
-				infof("Handle PR: %s#%d %s\n", ownerAndRepo, *ghPR.Number, *ghPR.Title)
-				debugf("%+v\n\n", ghPR)
-				pr := NewItemFromPR(ctx, client, ghPR, ownerAndRepo, &allUsers)
-				// The List options for PRs does not have a Since field (like Issues),
-				// so check here when to break.
-				if pr.CreatedAt.Before(period.Start) && pr.UpdatedAt.Before(period.Start) && pr.ClosedAt.Before(period.Start) {
-					return nil, nil
-				}
-				allPRs = append(allPRs, pr)
-			}
-			return resp, nil
-		})
-		if err != nil {
+		infof("Get PRs:\n")
+		if err := GetPRs(ctx, client, owner, repo, since, &allPRs, &allUsers); err != nil {
 			log.Printf("Error getting PRs for %s: %v", repo, err)
 		}
 
 		// Handle issues
-		infof("Handling Issues:\n")
-		err = doListOp(func(page int) (*github.Response, error) {
-			issueOpts := &github.IssueListByRepoOptions{
-				State:     "all",
-				Sort:      "updated",
-				Direction: "desc",
-				Since:     period.Start,
-			}
-			issueOpts.ListOptions.Page = page
-			ghIssues, resp, err := client.Issues.ListByRepo(ctx, owner, repo, issueOpts)
-			if err != nil {
-				log.Printf("Error getting issues for %s: %v", repo, err)
-				return nil, err
-			}
-			for _, ghIssue := range ghIssues {
-				// Only handle proper issues
-				if !ghIssue.IsPullRequest() {
-					infof("Handle Issue: %s#%d %s\n", ownerAndRepo, *ghIssue.Number, *ghIssue.Title)
-					debugf("%+v\n\n", ghIssue)
-					issue := NewItemFromIssue(ctx, client, ghIssue, ownerAndRepo, &allUsers)
-					allIssues = append(allIssues, issue)
-				}
-			}
-			return resp, nil
-		})
-		if err != nil {
+		infof("Get Issues:\n")
+		if err := GetIssues(ctx, client, owner, repo, since, &allIssues, &allUsers); err != nil {
 			log.Printf("Error getting Issues for %s: %v", repo, err)
 		}
 	}
