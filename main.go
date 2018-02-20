@@ -112,6 +112,7 @@ func main() {
 	var mergedPRs Items
 	var openedPRs Items
 	var closedIssues Items
+	var openedIssuesCount int
 	var openedIssues Items
 	var contributions int
 	contributors := make(Users)
@@ -147,7 +148,10 @@ func main() {
 			}
 		} else {
 			if period.Match(i.CreatedAt) {
-				openedIssues = append(openedIssues, i)
+				openedIssuesCount++
+				if !period.Match(i.ClosedAt) {
+					openedIssues = append(openedIssues, i)
+				}
 			}
 			if period.Match(i.ClosedAt) {
 				closedIssues = append(closedIssues, i)
@@ -164,7 +168,7 @@ func main() {
 		fmt.Printf(" [%s]", ownerAndRepo)
 	}
 	fmt.Println()
-	fmt.Printf("In the reporting period there were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d issues were opened and %d issues were closed.\n", contributions, len(contributors), len(openedPRs), len(mergedPRs), len(openedIssues), len(closedIssues))
+	fmt.Printf("In the reporting period there were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d issues were opened and %d issues were closed.\n", contributions, len(contributors), len(openedPRs), len(mergedPRs), openedIssuesCount, len(closedIssues))
 	fmt.Println()
 
 	fmt.Println("## Merged PRs:")
@@ -173,7 +177,7 @@ func main() {
 	fmt.Println("## Closed Issues:")
 	fmt.Println(closedIssues)
 	fmt.Println()
-	fmt.Println("## Opened Issues:")
+	fmt.Println("## Opened Issues (still open):")
 	fmt.Println(openedIssues)
 	fmt.Println()
 	for _, ownerAndRepo := range repos {
