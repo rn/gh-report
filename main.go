@@ -29,15 +29,15 @@ func daysIn(year int, m time.Month) int {
 // NewPeriodFromMonth coverts a string of the form month-year into a period with the start/end of the month
 func NewPeriodFromMonth(in string) (*Period, error) {
 	o := strings.SplitN(in, "-", 2)
-	m, err := strconv.Atoi(o[0])
+	year, err := strconv.Atoi(o[0])
+	if err != nil {
+		return nil, err
+	}
+	m, err := strconv.Atoi(o[1])
 	if err != nil {
 		return nil, err
 	}
 	month := time.Month(m)
-	year, err := strconv.Atoi(o[1])
-	if err != nil {
-		return nil, err
-	}
 
 	p := &Period{}
 	p.Start = time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
@@ -52,7 +52,7 @@ func (p *Period) Match(t time.Time) bool {
 
 func main() {
 	accessToken := flag.String("token", "", "GitHub access token")
-	monthly := flag.String("monthly", "", "Month to generate the report for, e.g. 01-2018")
+	monthly := flag.String("monthly", "", "Month to generate the report for, e.g. 2018-01")
 	verbose := flag.Int("v", 0, "Verbosity level")
 	flag.Parse()
 
@@ -61,16 +61,14 @@ func main() {
 	}
 	logLevel = *verbose
 
-	var period *Period
-	var since *time.Time
-	if *monthly != "" {
-		var err error
-		if period, err = NewPeriodFromMonth(*monthly); err != nil {
-			log.Fatal("Error parsing monthly", err)
-		}
-		since = &period.Start
+	if *monthly == "" {
+		log.Fatal("Please specify a month")
 	}
-	fmt.Printf("FROM %s TO %s\n", period.Start, period.End)
+	period, err := NewPeriodFromMonth(*monthly)
+	if err != nil {
+		log.Fatal("Error parsing month:", err)
+	}
+	infof("FROM %s TO %s\n", period.Start, period.End)
 
 	repos := flag.Args()
 
@@ -98,13 +96,13 @@ func main() {
 
 		// Handle PRs
 		infof("Get PRs:\n")
-		if err := GetPRs(ctx, client, owner, repo, since, &allPRs, &allUsers); err != nil {
+		if err := GetPRs(ctx, client, owner, repo, &period.Start, &allPRs, &allUsers); err != nil {
 			log.Printf("Error getting PRs for %s: %v", repo, err)
 		}
 
 		// Handle issues
 		infof("Get Issues:\n")
-		if err := GetIssues(ctx, client, owner, repo, since, &allIssues, &allUsers); err != nil {
+		if err := GetIssues(ctx, client, owner, repo, &period.Start, &allIssues, &allUsers); err != nil {
 			log.Printf("Error getting Issues for %s: %v", repo, err)
 		}
 	}
