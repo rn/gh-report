@@ -23,3 +23,9 @@ func debugf(format string, v ...interface{}) {
 		fmt.Fprintf(os.Stderr, format, v...)
 	}
 }
+
+func debug2f(format string, v ...interface{}) {
+	if logLevel >= 3 {
+		fmt.Fprintf(os.Stderr, format, v...)
+	}
+}

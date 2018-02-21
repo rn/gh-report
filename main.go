@@ -92,6 +92,7 @@ func main() {
 
 	for _, i := range append(allPRs, allIssues...) {
 		infof("Processing: %s\n", i)
+		debugf("%s\n\n", i.Dump())
 		users[i.CreatedBy.ID] = i.CreatedBy
 		if period.Match(i.CreatedAt) {
 			contributions++

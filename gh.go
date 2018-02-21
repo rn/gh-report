@@ -59,7 +59,7 @@ type Users map[string]*User
 
 // Add adds a GH user to a map of Users if the user does not exist
 func (users Users) Add(u *github.User) *User {
-	debugf("  Add user: %s\n", *u.Login)
+	debug2f("  Add user: %s\n", *u.Login)
 	if user, ok := users[*u.Login]; ok {
 		return user
 	}
@@ -95,6 +95,10 @@ func NewCommentFromPR(c *github.PullRequestComment, users *Users) *Comment {
 		comment.User = users.Add(c.User)
 	}
 	return comment
+}
+
+func (c *Comment) String() string {
+	return fmt.Sprintf("%s %s", c.CreatedAt, c.User.String())
 }
 
 // NewCommentFromReview creates a Comment from a GH pull request review.
@@ -261,6 +265,32 @@ func (i *Item) String() string {
 	return ret + ")"
 }
 
+// Dump returns a multi-line string of the item
+func (i *Item) Dump() string {
+	ret := fmt.Sprintf("%s: %s", i.ID, i.Title)
+	ret += fmt.Sprintf("\n  PR:        %t", i.PR)
+	ret += fmt.Sprintf("\n  State:     %s", i.State)
+	ret += fmt.Sprintf("\n  URL:       %s", i.URL)
+	ret += fmt.Sprintf("\n  Created:   %s %s", i.CreatedBy.String(), i.CreatedAt)
+	ret += fmt.Sprintf("\n  Updated:   %s", i.UpdatedAt)
+	if i.PR {
+		if i.Merged {
+			if i.MergedBy != nil {
+				ret += fmt.Sprintf("\n  Merged:   %s %s", i.MergedBy.String(), i.ClosedAt)
+			} else {
+				ret += fmt.Sprintf("\n  Merged:   %s", i.ClosedAt)
+			}
+		}
+	} else {
+		ret += fmt.Sprintf("\n  Closed:    %s", i.ClosedAt)
+	}
+	ret += fmt.Sprintf("\n  Comments:")
+	for _, c := range i.Comments {
+		ret += fmt.Sprintf("\n    %s", c)
+	}
+	return ret
+}
+
 // Link returns a markdown style link to the issue
 func (i *Item) Link() string {
 	return fmt.Sprintf("[%s]: %s", i.ID, i.URL)
@@ -314,7 +344,7 @@ func GetPRs(ctx context.Context, client *github.Client, owner, repo string, sinc
 		}
 		for _, ghPR := range ghPRs {
 			infof("Handle PR: %s/%s#%d %s\n", owner, repo, *ghPR.Number, *ghPR.Title)
-			debugf("%+v\n\n", ghPR)
+			debug2f("%+v\n\n", ghPR)
 			pr := NewItemFromPR(ctx, client, ghPR, fmt.Sprintf("%s/%s", owner, repo), users)
 			// The List options for PRs does not have a Since field (like Issues),
 			// so check here when to break.
@@ -349,7 +379,7 @@ func GetIssues(ctx context.Context, client *github.Client, owner, repo string, s
 			// Only handle proper issues
 			if !ghIssue.IsPullRequest() {
 				infof("Handle Issue: %s/%s#%d %s\n", owner, repo, *ghIssue.Number, *ghIssue.Title)
-				debugf("%+v\n\n", ghIssue)
+				debug2f("%+v\n\n", ghIssue)
 				issue := NewItemFromIssue(ctx, client, ghIssue, fmt.Sprintf("%s/%s", owner, repo), users)
 				*issues = append(*issues, issue)
 			}
