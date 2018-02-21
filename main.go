@@ -45,6 +45,44 @@ func NewPeriodFromMonth(in string) (*Period, error) {
 	return p, nil
 }
 
+// Return the monday of the ISO week in the given year
+// From: https://play.golang.org/p/UVFNFcpaoI
+func firstDayOfISOWeek(year int, week int) time.Time {
+	date := time.Date(year, 0, 0, 0, 0, 0, 0, time.UTC)
+	isoYear, isoWeek := date.ISOWeek()
+	for date.Weekday() != time.Monday { // iterate back to Monday
+		date = date.AddDate(0, 0, -1)
+		isoYear, isoWeek = date.ISOWeek()
+	}
+	for isoYear < year { // iterate forward to the first day of the first week
+		date = date.AddDate(0, 0, 1)
+		isoYear, isoWeek = date.ISOWeek()
+	}
+	for isoWeek < week { // iterate forward to the first day of the given week
+		date = date.AddDate(0, 0, 1)
+		isoYear, isoWeek = date.ISOWeek()
+	}
+	return date
+}
+
+// NewPeriodFromWeek coverts a string of the form week-year into a period with the start/end of the month
+func NewPeriodFromWeek(in string) (*Period, error) {
+	o := strings.SplitN(in, "-", 2)
+	year, err := strconv.Atoi(o[0])
+	if err != nil {
+		return nil, err
+	}
+	week, err := strconv.Atoi(o[1])
+	if err != nil {
+		return nil, err
+	}
+
+	p := &Period{}
+	p.Start = firstDayOfISOWeek(year, week)
+	p.End = p.Start.AddDate(0, 0, 7)
+	return p, nil
+}
+
 // Match returns true if t falls within the period
 func (p *Period) Match(t time.Time) bool {
 	return t.After(p.Start) && t.Before(p.End)
@@ -53,6 +91,7 @@ func (p *Period) Match(t time.Time) bool {
 func main() {
 	accessToken := flag.String("token", "", "GitHub access token")
 	monthly := flag.String("monthly", "", "Month to generate the report for, e.g. 2018-01")
+	weekly := flag.String("weekly", "", "(ISO) week to generate the report for, e.g. 2018-01")
 	verbose := flag.Int("v", 0, "Verbosity level")
 	flag.Parse()
 
@@ -61,12 +100,22 @@ func main() {
 	}
 	logLevel = *verbose
 
-	if *monthly == "" {
-		log.Fatal("Please specify a month")
+	if (*monthly == "" && *weekly == "") || (*monthly != "" && *weekly != "") {
+		log.Fatal("Please specify either a month or a week")
 	}
-	period, err := NewPeriodFromMonth(*monthly)
-	if err != nil {
-		log.Fatal("Error parsing month:", err)
+	var err error
+	var period *Period
+	if *monthly != "" {
+		period, err = NewPeriodFromMonth(*monthly)
+		if err != nil {
+			log.Fatal("Error parsing month:", err)
+		}
+	}
+	if *weekly != "" {
+		period, err = NewPeriodFromWeek(*weekly)
+		if err != nil {
+			log.Fatal("Error parsing week:", err)
+		}
 	}
 	infof("FROM %s TO %s\n", period.Start, period.End)
 
