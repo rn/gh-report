@@ -82,10 +82,11 @@ func main() {
 	// Phase 2: Filter
 
 	var mergedPRs Items
-	var openedPRs Items
 	var closedIssues Items
+	var updatedItems Items
+
+	var openedPRsCount int
 	var openedIssuesCount int
-	var openedIssues Items
 	var contributions int
 	contributors := make(Users)
 	users := make(Users)
@@ -93,42 +94,54 @@ func main() {
 	for _, i := range append(allPRs, allIssues...) {
 		infof("Processing: %s\n", i)
 		debugf("%s\n\n", i.Dump())
+
+		// Record all users as they may be linked in Issues/PRs
 		users[i.CreatedBy.ID] = i.CreatedBy
-		if period.Match(i.CreatedAt) {
-			contributions++
-			contributors[i.CreatedBy.ID] = i.CreatedBy
-		}
+
+		// Handle comments first
 		for _, comment := range i.Comments {
 			if period.Match(comment.CreatedAt) {
 				contributions++
 				contributors[i.CreatedBy.ID] = i.CreatedBy
 			}
+			// Record all users as they may be linked in Issues/PRs
 			users[comment.User.ID] = comment.User
 		}
 
-		if i.PR {
-			if period.Match(i.CreatedAt) {
-				openedPRs = append(openedPRs, i)
-			}
-			if period.Match(i.ClosedAt) && i.Merged {
-				mergedPRs = append(mergedPRs, i)
-				contributions++
-				// Sigh...sometimes MergedBy is not filled in
-				if i.MergedBy != nil {
-					users[i.MergedBy.ID] = i.MergedBy
-					contributors[i.MergedBy.ID] = i.MergedBy
-				}
-			}
-		} else {
-			if period.Match(i.CreatedAt) {
+		// Next handle contributions from new Items
+		if period.Match(i.CreatedAt) {
+			// Only count contributor here. Item will be put on the appropriate list below
+			contributions++
+			contributors[i.CreatedBy.ID] = i.CreatedBy
+			if i.PR {
+				openedPRsCount++
+			} else {
 				openedIssuesCount++
-				if !period.Match(i.ClosedAt) {
-					openedIssues = append(openedIssues, i)
-				}
 			}
-			if period.Match(i.ClosedAt) {
+		}
+
+		// Next handle closed PRs and issues
+		if period.Match(i.ClosedAt) {
+			if i.PR {
+				if i.Merged {
+					mergedPRs = append(mergedPRs, i)
+					// Sigh...sometimes MergedBy is not filled in
+					if i.MergedBy != nil {
+						users[i.MergedBy.ID] = i.MergedBy
+						contributors[i.MergedBy.ID] = i.MergedBy
+					}
+				} else {
+					// PR was *not* merged. Count as updated
+					updatedItems = append(updatedItems, i)
+				}
+			} else {
+				// Issues, just add to closed issues list
 				closedIssues = append(closedIssues, i)
 			}
+		} else {
+			// Not closed so add to updated list
+			// Contributions were already counted.
+			updatedItems = append(updatedItems, i)
 		}
 	}
 
@@ -136,28 +149,31 @@ func main() {
 
 	fmt.Printf("# Report for %s\n", *monthly)
 
+	fmt.Printf("In the reporting period there were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d new issues were opened and %d issues were closed.\n", contributions, len(contributors), openedPRsCount, len(mergedPRs), openedIssuesCount, len(closedIssues))
+	fmt.Println()
 	fmt.Printf("This report covers the following repositories:")
 	for _, ownerAndRepo := range repos {
 		fmt.Printf(" [%s]", ownerAndRepo)
 	}
 	fmt.Println()
-	fmt.Printf("In the reporting period there were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d issues were opened and %d issues were closed.\n", contributions, len(contributors), len(openedPRs), len(mergedPRs), openedIssuesCount, len(closedIssues))
-	fmt.Println()
 
+	// Details
 	fmt.Println("## Merged PRs:")
 	fmt.Println(mergedPRs)
 	fmt.Println()
 	fmt.Println("## Closed Issues:")
 	fmt.Println(closedIssues)
 	fmt.Println()
-	fmt.Println("## Opened Issues (still open):")
-	fmt.Println(openedIssues)
+	fmt.Println("## New or updated PRs and Issues (not closed):")
+	fmt.Println(updatedItems)
+
+	// Links
 	fmt.Println()
 	for _, ownerAndRepo := range repos {
 		fmt.Printf("[%s]: https://github.com/%s\n", ownerAndRepo, ownerAndRepo)
 	}
 	fmt.Println(mergedPRs.Links())
 	fmt.Println(closedIssues.Links())
-	fmt.Println(openedIssues.Links())
+	fmt.Println(updatedItems.Links())
 	fmt.Println(users.Links())
 }

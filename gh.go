@@ -276,9 +276,9 @@ func (i *Item) Dump() string {
 	if i.PR {
 		if i.Merged {
 			if i.MergedBy != nil {
-				ret += fmt.Sprintf("\n  Merged:   %s %s", i.MergedBy.String(), i.ClosedAt)
+				ret += fmt.Sprintf("\n  Merged:    %s %s", i.MergedBy.String(), i.ClosedAt)
 			} else {
-				ret += fmt.Sprintf("\n  Merged:   %s", i.ClosedAt)
+				ret += fmt.Sprintf("\n  Merged:    %s", i.ClosedAt)
 			}
 		}
 	} else {
