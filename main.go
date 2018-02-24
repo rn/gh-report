@@ -52,7 +52,7 @@ func main() {
 
 	client := github.NewClient(tc)
 
-	// Phase 1: Gather information about PRs/Issues/Users
+	// Gather information about PRs/Issues/Users
 
 	allUsers := make(Users)
 	var allPRs Items
@@ -79,8 +79,11 @@ func main() {
 		}
 	}
 
-	// Phase 2: Filter
+	repoReport(repos, period, allPRs, allIssues)
+}
 
+// repoReport generates a report about activity on Repositories
+func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 	var mergedPRs Items
 	var closedIssues Items
 	var updatedItems Items
@@ -145,9 +148,9 @@ func main() {
 		}
 	}
 
-	// Phase 3: Print output in markdown fragments
+	// Print output in markdown fragments
 
-	fmt.Printf("# Report for %s\n", *monthly)
+	fmt.Printf("# Report for %s\n", *period)
 
 	fmt.Printf("In the reporting period there were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d new issues were opened and %d issues were closed.\n", contributions, len(contributors), openedPRsCount, len(mergedPRs), openedIssuesCount, len(closedIssues))
 	fmt.Println()
