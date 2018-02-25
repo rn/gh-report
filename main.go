@@ -110,7 +110,7 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 		for _, comment := range i.Comments {
 			if period.Match(comment.CreatedAt) {
 				contributions++
-				contributors[i.CreatedBy.ID] = i.CreatedBy
+				contributors[comment.User.ID] = comment.User
 			}
 			// Record all users as they may be linked in Issues/PRs
 			users[comment.User.ID] = comment.User
