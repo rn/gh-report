@@ -15,6 +15,7 @@ func main() {
 	accessToken := flag.String("token", "", "GitHub access token")
 	monthly := flag.String("monthly", "", "Month to generate the report for, e.g. 2018-01")
 	weekly := flag.String("weekly", "", "(ISO) week to generate the report for, e.g. 2018-01")
+	user := flag.String("user", "", "Only report activity for a single user")
 	verbose := flag.Int("v", 0, "Verbosity level")
 	flag.Parse()
 
@@ -79,7 +80,11 @@ func main() {
 		}
 	}
 
-	repoReport(repos, period, allPRs, allIssues)
+	if *user != "" {
+		userReport(repos, period, *user, allPRs, allIssues)
+	} else {
+		repoReport(repos, period, allPRs, allIssues)
+	}
 }
 
 // repoReport generates a report about activity on Repositories
@@ -179,4 +184,58 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 	fmt.Println(closedIssues.Links())
 	fmt.Println(updatedItems.Links())
 	fmt.Println(users.Links())
+}
+
+// userReport generates a report about activity of a single user
+func userReport(repos []string, period *Period, user string, allPRs, allIssues Items) {
+	var userPRs Items
+	var reviewedPRs Items
+	var userIssues Items
+	var commentIssues Items
+
+	for _, pr := range allPRs {
+		if period.Match(pr.CreatedAt) && pr.CreatedBy.ID == user {
+			userPRs = append(userPRs, pr)
+			continue
+		}
+		if period.Match(pr.ClosedAt) && pr.MergedBy != nil && pr.MergedBy.ID == user {
+			reviewedPRs = append(reviewedPRs, pr)
+			continue
+		}
+		for _, comment := range pr.Comments {
+			if period.Match(comment.CreatedAt) && comment.User.ID == user {
+				reviewedPRs = append(reviewedPRs, pr)
+				break
+			}
+		}
+	}
+	for _, i := range allIssues {
+		if period.Match(i.CreatedAt) && i.CreatedBy.ID == user {
+			userIssues = append(userIssues, i)
+			continue
+		}
+		for _, comment := range i.Comments {
+			if period.Match(comment.CreatedAt) && comment.User.ID == user {
+				commentIssues = append(commentIssues, i)
+				break
+			}
+		}
+	}
+
+	fmt.Println("## PRs:")
+	fmt.Println(userPRs)
+	fmt.Println()
+	fmt.Println("## Reviewed PRs:")
+	fmt.Println(reviewedPRs)
+	fmt.Println()
+	fmt.Println("## Issues:")
+	fmt.Println(userIssues)
+	fmt.Println()
+	fmt.Println("## Issues commented on:")
+	fmt.Println(commentIssues)
+	fmt.Println()
+	fmt.Println(userPRs.Links())
+	fmt.Println(reviewedPRs.Links())
+	fmt.Println(userIssues.Links())
+	fmt.Println(commentIssues.Links())
 }
