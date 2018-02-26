@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +11,15 @@ import (
 type Period struct {
 	Start time.Time
 	End   time.Time
+}
+
+func (p *Period) String() string {
+	return fmt.Sprintf("%s to %s", p.Start.Format("2006-01-02"), p.End.Format("2006-01-02"))
+}
+
+// Match returns true if t falls within the period
+func (p *Period) Match(t time.Time) bool {
+	return t.After(p.Start) && t.Before(p.End)
 }
 
 // daysIn returns the number of days in a month for a given year.
@@ -74,9 +84,4 @@ func NewPeriodFromWeek(in string) (*Period, error) {
 	p.Start = firstDayOfISOWeek(year, week)
 	p.End = p.Start.AddDate(0, 0, 7)
 	return p, nil
-}
-
-// Match returns true if t falls within the period
-func (p *Period) Match(t time.Time) bool {
-	return t.After(p.Start) && t.Before(p.End)
 }

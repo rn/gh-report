@@ -161,7 +161,7 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 
 	// Print output in markdown fragments
 
-	fmt.Printf("# Report for %s\n", *period)
+	fmt.Printf("# Report for %s\n", period)
 	fmt.Println()
 	fmt.Printf("This report covers the development in the")
 	for _, ownerAndRepo := range repos {
