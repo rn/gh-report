@@ -314,7 +314,12 @@ func (items Items) String() string {
 	})
 	var ret string
 	var r string
+	var repo string
 	for _, item := range items {
+		if item.Repo != repo {
+			r += "\n"
+			repo = item.Repo
+		}
 		r += ret + "- " + item.String()
 		if ret == "" {
 			ret = "\n"
