@@ -162,13 +162,12 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 	// Print output in markdown fragments
 
 	fmt.Printf("# Report for %s\n", *period)
-
-	fmt.Printf("In the reporting period there were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d new issues were opened and %d issues were closed.\n", contributions, len(contributors), openedPRsCount, len(mergedPRs), openedIssuesCount, len(closedIssues))
 	fmt.Println()
-	fmt.Printf("This report covers the following repositories:")
+	fmt.Printf("This report covers the development in the")
 	for _, ownerAndRepo := range repos {
 		fmt.Printf(" [%s]", ownerAndRepo)
 	}
+	fmt.Printf(" repositories. There were %d contributions (PRs/Issues/Comments) from %d individual contributors. %d new PRs were opened and %d PRs were merged. %d new issues were opened and %d issues were closed.\n", contributions, len(contributors), openedPRsCount, len(mergedPRs), openedIssuesCount, len(closedIssues))
 	fmt.Println()
 
 	// Details
