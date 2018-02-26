@@ -103,6 +103,8 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 		infof("Processing: %s\n", i)
 		debugf("%s\n\n", i.Dump())
 
+		var updated bool
+		
 		// Record all users as they may be linked in Issues/PRs
 		users[i.CreatedBy.ID] = i.CreatedBy
 
@@ -111,6 +113,7 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 			if period.Match(comment.CreatedAt) {
 				contributions++
 				contributors[comment.User.ID] = comment.User
+				updated = true
 			}
 			// Record all users as they may be linked in Issues/PRs
 			users[comment.User.ID] = comment.User
@@ -118,6 +121,7 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 
 		// Next handle contributions from new Items
 		if period.Match(i.CreatedAt) {
+			updated = true
 			// Only count contributor here. Item will be put on the appropriate list below
 			contributions++
 			contributors[i.CreatedBy.ID] = i.CreatedBy
@@ -147,9 +151,11 @@ func repoReport(repos []string, period *Period, allPRs, allIssues Items) {
 				closedIssues = append(closedIssues, i)
 			}
 		} else {
-			// Not closed so add to updated list
-			// Contributions were already counted.
-			updatedItems = append(updatedItems, i)
+			if updated {
+				// Not closed, but updated, so add to updated list
+				// Contributions were already counted.
+				updatedItems = append(updatedItems, i)
+			}
 		}
 	}
 
