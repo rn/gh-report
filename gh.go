@@ -197,6 +197,10 @@ func NewItemFromPR(ctx context.Context, client *github.Client, pr *github.PullRe
 			return nil, err
 		}
 		for _, ghReview := range ghReviews {
+			// Skip pending reviews. They have some fields missing.
+			if *ghReview.State == "PENDING" {
+				continue
+			}
 			c := NewCommentFromReview(ghReview, users)
 			i.Comments = append(i.Comments, c)
 		}
